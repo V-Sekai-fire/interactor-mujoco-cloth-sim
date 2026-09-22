@@ -12,7 +12,7 @@ extends Node3D
 var _sandboxes: Array = []
 
 func _enter_tree() -> void:
-	var program := load(elf_path)
+	var program := ResourceLoader.load(elf_path, "", ResourceLoader.CACHE_MODE_IGNORE_DEEP)
 	for i in range(islands):
 		var sb: Object = ClassDB.instantiate("Sandbox")
 		if sb == null:
@@ -57,3 +57,35 @@ func faces(i: int) -> PackedFloat64Array:
 
 func digest(i: int) -> int:
 	return int(_sandboxes[i].vmcall("avbd_hash")) if i < _sandboxes.size() else 0
+
+func grab(i: int, v: int) -> void:
+	if i < _sandboxes.size():
+		_sandboxes[i].vmcall("avbd_grab", v)
+
+func drag(i: int, x: float, y: float, z: float) -> void:
+	if i < _sandboxes.size():
+		_sandboxes[i].vmcall("avbd_drag", x, y, z)
+
+func release(i: int) -> void:
+	if i < _sandboxes.size():
+		_sandboxes[i].vmcall("avbd_release")
+
+func bar(i: int, x: float, y: float, z: float) -> void:
+	if i < _sandboxes.size():
+		_sandboxes[i].vmcall("avbd_bar", x, y, z)
+
+func reset(i: int) -> void:
+	if i < _sandboxes.size():
+		_sandboxes[i].vmcall("avbd_load", nx, ny)
+		_sandboxes[i].vmcall("avbd_set_iters", iters)
+
+func snapshot(i: int) -> void:
+	if i < _sandboxes.size():
+		_sandboxes[i].vmcall("avbd_snapshot")
+
+func restore(i: int) -> void:
+	if i < _sandboxes.size():
+		_sandboxes[i].vmcall("avbd_restore")
+
+func finite(i: int) -> bool:
+	return bool(_sandboxes[i].vmcall("avbd_finite")) if i < _sandboxes.size() else true
