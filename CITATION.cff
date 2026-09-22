@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this work, please cite it as below."
+title: "interactor-mujoco-cloth-sim"
+abstract: "Deterministic cloth on a RISC-V/MuJoCo guest: a pinned garment panel whose iterative drape solve is bit-identical on every host."
+authors:
+  - name: "V-Sekai-fire"
+  - name: "chibifire"
+license: "MIT"
+repository-code: "https://github.com/V-Sekai-fire/interactor-mujoco-cloth-sim"
