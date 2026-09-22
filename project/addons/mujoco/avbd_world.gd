@@ -2,10 +2,6 @@
 class_name AvbdWorld
 extends Node3D
 
-## Several AVBD cloth islands, each in its own godot-sandbox RISC-V guest. Each
-## island is independent, so the islands step in parallel on the worker pool for
-## multi-core throughput while every island stays bit-identical across hosts.
-
 @export_file("*.elf") var elf_path: String = "res://plans/avbd.elf"
 @export var islands: int = 8
 @export var nx: int = 10
@@ -38,15 +34,11 @@ func count() -> int:
 func alive() -> bool:
 	return _sandboxes.size() > 0 and int(_sandboxes[0].vmcall("avbd_nverts")) > 0
 
-## Run each island one worker thread. Sandbox vmcall must happen on the main
-## thread in this build, so parallel stepping is opt-in and off by default.
 @export var parallel: bool = false
 
 func _step_island(i: int) -> void:
 	_sandboxes[i].vmcall("avbd_step", substeps)
 
-## Step every island. Islands never share state, so serial and parallel give
-## the same per-island result.
 func step() -> void:
 	if _sandboxes.is_empty():
 		return
@@ -63,6 +55,5 @@ func verts(i: int) -> PackedFloat64Array:
 func faces(i: int) -> PackedFloat64Array:
 	return _sandboxes[i].vmcall("avbd_faces") if i < _sandboxes.size() else PackedFloat64Array()
 
-## Digest of island i's state — equal run to run and across hosts.
 func digest(i: int) -> int:
 	return int(_sandboxes[i].vmcall("avbd_hash")) if i < _sandboxes.size() else 0

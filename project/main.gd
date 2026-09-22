@@ -1,10 +1,6 @@
 @tool
 extends Node3D
 
-## AVBD cloth: a row of independent islands, each solved in its own RISC-V
-## sandbox and stepped in parallel on the worker pool. Every island is
-## bit-identical across hosts; the row shows the multi-core throughput.
-
 const ISLANDS := 8
 const SPACING := 0.62
 const SUBSTEP_H := 0.005  # AVBD fixed substep, matches ClothSim::H
@@ -17,8 +13,6 @@ var _capturing := false
 var _frames := 0
 
 func _ready() -> void:
-	# When launched with `--write-movie ... -- capture`, record a fixed length
-	# then quit; Movie Maker feeds each frame to the CineForm writer.
 	_capturing = OS.get_cmdline_user_args().has("capture")
 	_build_scene()
 	_world = AvbdWorldScript.new()
@@ -33,7 +27,6 @@ func _ready() -> void:
 	mat.roughness = 0.85
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 
-	# Connectivity is identical across islands, so it is read once.
 	var f: PackedFloat64Array = _world.faces(0)
 	for v in f:
 		_faces.append(int(v))
@@ -48,8 +41,6 @@ func _ready() -> void:
 func _process(_dt: float) -> void:
 	if _world == null or not _world.alive():
 		return
-	# Fixed 4 substeps of 5 ms = 20 ms of sim per frame; at 50 fps that is
-	# realtime, and it keeps the step count deterministic for capture.
 	_world.substeps = 4
 	_world.step()
 	for i in range(_meshes.size()):
@@ -90,8 +81,6 @@ func _build_scene() -> void:
 	light.rotation = Vector3(-0.9, 0.5, 0.0)
 	add_child(light)
 	var cam := Camera3D.new()
-	# Elevated 3/4 view so the panels read as surfaces and the downward drape
-	# between the pinned corners is clearly visible (not edge-on).
 	cam.position = Vector3(0.0, 2.5, 3.2)
 	cam.fov = 55.0
 	add_child(cam)
