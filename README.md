@@ -29,8 +29,7 @@ which reaches determinism the easy way from sparse planar steering.
     python scripts/make_cloth.py --cells 40      # a finer weave
     python scripts/make_cloth.py --self-test     # 11 controls, incl. a negative control
 
-Loading the model needs a MuJoCo build with flex and the `mujoco.elasticity.shell`
-plugin. The generator itself only touches the XML AST, so its self-test runs with
+Loading the model needs a MuJoCo build with flex (native `<elasticity>`, MuJoCo 3.3+). The generator itself only touches the XML AST, so its self-test runs with
 no MuJoCo installed.
 
 ## Credit

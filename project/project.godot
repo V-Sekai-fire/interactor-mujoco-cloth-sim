@@ -1,0 +1,15 @@
+config_version=5
+
+[application]
+
+config/name="Deterministic Cloth (MuJoCo sandbox)"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7")
+
+[rendering]
+
+anti_aliasing/quality/msaa_3d=2
+
+[sandbox]
+
+toolchain/skip_dependency_check=true

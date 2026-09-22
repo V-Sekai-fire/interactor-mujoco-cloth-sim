@@ -2,20 +2,25 @@
 """Generate a draping garment panel MJCF from an XML AST.
 
 A rectangular cloth panel is pinned along its top edge and left to hang under
-gravity. The panel is a MuJoCo flex grid with the shell-elasticity plugin, so
-the drape is a genuine iterative constraint solve -- the order-sensitive,
+gravity. The panel is a MuJoCo flex grid with native shell elasticity, so the
+drape is a genuine iterative constraint solve -- the order-sensitive,
 cross-platform-fragile kind of physics -- not a rigid approximation.
 
 That fragility is the reason this demo exists. Its sibling,
 interactor-taskweft-crowd, gets bit-identical results the easy way, from sparse
 planar steering. This one gets them the hard way: the same pinned panel must
-settle into the same fold on x86_64 and arm64, decode-for-decode, when it runs
-as a RISC-V guest under libriscv. A cloth solve that agrees across hosts is a
-much stronger determinism claim than a crowd that does.
+settle into the same fold on x86_64 and arm64 when it runs as a RISC-V guest
+under libriscv.
 
     python scripts/make_cloth.py                  # write the model
     python scripts/make_cloth.py --cells 40       # a finer weave
-    python scripts/make_cloth.py --self-test      # controls
+    python scripts/make_cloth.py --self-test      # AST controls, no MuJoCo needed
+    python scripts/make_cloth.py --verify         # load in MuJoCo and check the drape
+
+Note the pin geometry: MuJoCo lays flex-grid vertices y-fastest, so the top edge
+is `ix*ny + (ny-1)`, not `(ny-1)*nx + ix`. `--verify` checks the pinned ids are
+the vertices MuJoCo actually places at the top, which is what catches a wrong
+ordering; the AST self-test alone cannot, since it has no MuJoCo to ask.
 """
 
 import argparse
@@ -29,17 +34,21 @@ OUT = pathlib.Path(__file__).resolve().parent.parent / "project" / "plans" / "cl
 # 0.7 m, a shade larger, hung from its 0.5 m top edge.
 WIDTH = 0.50
 HEIGHT = 0.70
-CELLS = 24               # grid cells along the shorter edge
+CELLS = 24               # grid cells along the shorter (width) edge
 PANEL_TOP_Z = 1.20       # top edge height above the floor
 MASS = 0.05              # about a fat quarter of cotton, roughly a golf ball's mass
-RADIUS = 0.003           # flex collision thickness, about two credit cards
+RADIUS = 0.003           # flex collision thickness, about four stacked credit cards
 
-# Cloth wants a small step and Newton; this pairing settled the panel without
-# the weave exploding at the pinned edge.
+# Cloth wants a small step and the discrete integrator; MuJoCo requires
+# integrator="discrete" for flex elasticity (implicit/implicitfast are rejected).
+# young/poisson/thickness set a light, drapeable fabric, and elastic2d="both"
+# turns on bending and stretching so the sheet has real passive forces rather
+# than hanging slack.
 TIMESTEP = 0.001
 YOUNGS = "3e4"
 POISSON = "0.3"
 THICKNESS = "1e-3"
+ELASTIC2D = "both"
 
 
 def grid_counts():
@@ -50,9 +59,10 @@ def grid_counts():
 
 
 def top_row_ids(nx, ny):
-    """Vertex ids of the top edge. Grid vertices run x-fastest, so the top row
-    (largest y index) is the last nx ids."""
-    return [(ny - 1) * nx + ix for ix in range(nx)]
+    """Vertex ids of the top edge. MuJoCo lays flex-grid vertices y-fastest --
+    id = ix*ny + iy -- so the top row (iy = ny-1) is ix*ny + (ny-1) for each
+    column ix. `--verify` checks this against the geometry MuJoCo produces."""
+    return [ix * ny + (ny - 1) for ix in range(nx)]
 
 
 def build_tree(cells=CELLS):
@@ -63,10 +73,8 @@ def build_tree(cells=CELLS):
     sy = HEIGHT / (ny - 1)
 
     m = ET.Element("mujoco", model="garment_drape")
-    ext = ET.SubElement(m, "extension")
-    ET.SubElement(ext, "plugin", plugin="mujoco.elasticity.shell")
     ET.SubElement(m, "option", timestep=str(TIMESTEP), gravity="0 0 -9.81",
-                  solver="Newton", integrator="implicitfast", tolerance="1e-10")
+                  solver="Newton", integrator="discrete", tolerance="1e-10")
 
     world = ET.SubElement(m, "worldbody")
     ET.SubElement(world, "geom", name="floor", type="plane", size="2 2 0.1",
@@ -78,13 +86,9 @@ def build_tree(cells=CELLS):
                          spacing="%.5f %.5f 0.01" % (sx, sy),
                          dim="2", mass=str(MASS), radius=str(RADIUS),
                          rgba="0.7 0.3 0.4 1")
-    ET.SubElement(flex, "edge", equality="true")
-    pinned = top_row_ids(nx, ny)
-    ET.SubElement(flex, "pin", id=" ".join(str(i) for i in pinned))
-    plug = ET.SubElement(flex, "plugin", plugin="mujoco.elasticity.shell")
-    ET.SubElement(plug, "config", key="thickness", value=THICKNESS)
-    ET.SubElement(plug, "config", key="youngs", value=YOUNGS)
-    ET.SubElement(plug, "config", key="poisson", value=POISSON)
+    ET.SubElement(flex, "elasticity", young=YOUNGS, poisson=POISSON,
+                  thickness=THICKNESS, elastic2d=ELASTIC2D)
+    ET.SubElement(flex, "pin", id=" ".join(str(i) for i in top_row_ids(nx, ny)))
     return m
 
 
@@ -113,24 +117,31 @@ def self_test():
     control("cell spacing is positive in the plane", sp[0] > 0 and sp[1] > 0,
             "%.1f by %.1f mm cells" % (sp[0] * 1000, sp[1] * 1000))
 
-    pins = flex.find("pin").get("id").split()
-    control("the whole top edge is pinned", len(pins) == nx, "%d of %d" % (len(pins), nx))
-    control("the pinned ids are the top row",
-            [int(p) for p in pins] == top_row_ids(nx, ny))
+    pins = [int(p) for p in flex.find("pin").get("id").split()]
+    control("one pin per column across the width", len(pins) == nx, "%d of %d" % (len(pins), nx))
+    # A real ordering guard needs MuJoCo (see --verify). What the AST can check is
+    # that the ids are the y-fastest top edge and NOT the old x-fastest formula,
+    # so a regression back to the wrong formula fails here.
+    wrong = sorted((ny - 1) * nx + i for i in range(nx))
+    control("pins use the y-fastest top edge, not the old x-fastest formula",
+            sorted(pins) == top_row_ids(nx, ny) and sorted(pins) != wrong)
 
-    control("the shell elasticity plugin is declared as an extension",
-            m.find(".//extension/plugin[@plugin='mujoco.elasticity.shell']") is not None)
-    control("the flex references that plugin",
-            flex.find("plugin[@plugin='mujoco.elasticity.shell']") is not None)
+    el = flex.find("elasticity")
+    control("native elasticity is present (no removed plugin)",
+            el is not None and m.find(".//plugin") is None)
+    control("elasticity turns on passive bending and stretching",
+            el is not None and el.get("elastic2d") == "both")
 
     control("gravity pulls down", m.find("option").get("gravity").split()[2].startswith("-"))
     control("the step is small enough for a cloth solve",
             float(m.find("option").get("timestep")) <= 0.002,
             "%.1f ms" % (float(m.find("option").get("timestep")) * 1000))
 
-    # Negative control: pinning nothing would let the panel fall to the floor,
-    # so an empty pin list must not read as a valid hanging panel.
-    control("an unpinned panel would be caught", not (len([]) == nx))
+    # A hand-computed oracle exercises the real formula: for a 3x4 grid the
+    # y-fastest top edge is [3, 7, 11]; the removed x-fastest formula gave
+    # [9, 10, 11]. A regression to the old formula fails here.
+    control("the top-edge formula matches a hand-computed oracle, not the old one",
+            top_row_ids(3, 4) == [3, 7, 11] and top_row_ids(3, 4) != [9, 10, 11])
 
     for name, ok, detail in controls:
         print(("PASS" if ok else "FAIL") + "  " + name + ("  [" + detail + "]" if detail else ""))
@@ -139,17 +150,83 @@ def self_test():
     return 0 if passed == len(controls) else 1
 
 
+def verify():
+    """Load the model in MuJoCo and check the pin geometry and the drape. This is
+    the check the AST self-test cannot do: it asks MuJoCo where the vertices are."""
+    try:
+        import mujoco
+        import numpy as np
+    except ImportError:
+        print("VERIFY SKIPPED: mujoco/numpy not installed -- this is NOT a pass; "
+              "run in the dev/CI environment that has MuJoCo.")
+        return 2
+    mujoco.mj_loadAllPluginLibraries(mujoco.PLUGINS_DIR)
+    nx, ny = grid_counts()
+    m = mujoco.MjModel.from_xml_string(build())
+    d = mujoco.MjData(m)
+    mujoco.mj_forward(m, d)
+    P = d.flexvert_xpos.reshape(-1, 3)
+    pinned = top_row_ids(nx, ny)
+    ymax = P[:, 1].max()
+    top_geom = sorted(np.where(np.abs(P[:, 1] - ymax) < 1e-6)[0].tolist())
+
+    ok1 = top_geom == sorted(pinned)
+    print(("PASS" if ok1 else "FAIL") +
+          "  the pinned ids are the vertices MuJoCo places on the top edge"
+          "  [pinned %s vs geometry %s]" % (sorted(pinned)[:3], top_geom[:3]))
+
+    z0 = float(P[pinned, 2].mean())
+    for _ in range(3000):
+        mujoco.mj_step(m, d)
+    P = d.flexvert_xpos.reshape(-1, 3)
+    z1 = float(P[pinned, 2].mean())
+    drop = PANEL_TOP_Z - float(P[:, 2].min())
+    ok2 = abs(z1 - z0) < 1e-3
+    print(("PASS" if ok2 else "FAIL") +
+          "  the pinned edge stays put while the panel hangs"
+          "  [pinned z %.3f -> %.3f, drape drop %.3f m]" % (z0, z1, drop))
+    ok3 = drop > 0.10
+    print(("PASS" if ok3 else "FAIL") +
+          "  the free edge actually drapes (a stuck panel would be caught)"
+          "  [%.0f mm, about %.1f golf balls]" % (drop * 1000, drop / 0.0427))
+
+    # The determinism the demo exists to show: on one CPU build, two runs of the
+    # same guest must be bit-identical. Cross-host bit-identity is what the
+    # interpreted RISC-V guest then adds on top; this is the floor it builds on.
+    import hashlib
+
+    def digest(nsteps):
+        mm = mujoco.MjModel.from_xml_string(build())
+        dd = mujoco.MjData(mm)
+        mujoco.mj_forward(mm, dd)
+        for _ in range(nsteps):
+            mujoco.mj_step(mm, dd)
+        return hashlib.sha256(np.ascontiguousarray(dd.flexvert_xpos).tobytes()).hexdigest()[:16]
+
+    h1, h2 = digest(2000), digest(2000)
+    ok4 = h1 == h2
+    print(("PASS" if ok4 else "FAIL") +
+          "  the cloth solve is bit-identical run to run on this CPU  [%s vs %s]" % (h1, h2))
+
+    passed = sum([ok1, ok2, ok3, ok4])
+    print("%d/4 MuJoCo checks" % passed)
+    return 0 if passed == 4 else 1
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--cells", type=int, default=CELLS)
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--verify", action="store_true")
     args = ap.parse_args()
     if args.self_test:
         return self_test()
+    if args.verify:
+        return verify()
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(build(args.cells), encoding="utf-8", newline="\n")
     nx, ny = grid_counts()
-    print("wrote %s (%dx%d weave, %.0f by %.0f cm panel)"
+    print("wrote %s (%dx%d weave, %.0f by %.0f cm panel, about a fat quarter of fabric)"
           % (OUT, nx, ny, WIDTH * 100, HEIGHT * 100))
     return 0
 
