@@ -3,8 +3,6 @@ class_name MujocoWorld
 extends Node3D
 
 ## A MuJoCo model running in the godot-sandbox RISC-V guest. The physics is
-## interpreted and deterministic; this node loads it, steps it, and hands the
-## state back so a scene can draw and drive it.
 
 @export_file("*.elf") var elf_path: String = "res://plans/mujoco.elf"
 @export_file("*.xml") var model_path: String = ""

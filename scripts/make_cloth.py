@@ -1,26 +1,10 @@
 #!/usr/bin/env python3
-"""Generate a draping garment panel MJCF from an XML AST.
+"""Generate the draping garment panel MJCF from an XML AST. See the README.
 
-A rectangular cloth panel is pinned along its top edge and left to hang under
-gravity. The panel is a MuJoCo flex grid with native shell elasticity, so the
-drape is a genuine iterative constraint solve -- the order-sensitive,
-cross-platform-fragile kind of physics -- not a rigid approximation.
+Pins use the y-fastest top edge (ix*ny + ny-1); --verify checks that against
+MuJoCo's actual vertex placement.
 
-That fragility is the reason this demo exists. Its sibling,
-interactor-taskweft-crowd, gets bit-identical results the easy way, from sparse
-planar steering. This one gets them the hard way: the same pinned panel must
-settle into the same fold on x86_64 and arm64 when it runs as a RISC-V guest
-under libriscv.
-
-    python scripts/make_cloth.py                  # write the model
-    python scripts/make_cloth.py --cells 40       # a finer weave
-    python scripts/make_cloth.py --self-test      # AST controls, no MuJoCo needed
-    python scripts/make_cloth.py --verify         # load in MuJoCo and check the drape
-
-Note the pin geometry: MuJoCo lays flex-grid vertices y-fastest, so the top edge
-is `ix*ny + (ny-1)`, not `(ny-1)*nx + ix`. `--verify` checks the pinned ids are
-the vertices MuJoCo actually places at the top, which is what catches a wrong
-ordering; the AST self-test alone cannot, since it has no MuJoCo to ask.
+    python scripts/make_cloth.py [--cells N] [--self-test] [--verify]
 """
 
 import argparse
@@ -30,8 +14,6 @@ import xml.etree.ElementTree as ET
 
 OUT = pathlib.Path(__file__).resolve().parent.parent / "project" / "plans" / "cloth.xml"
 
-# A fat quarter of quilting cotton is about 46 by 56 cm; this panel is 0.5 by
-# 0.7 m, a shade larger, hung from its 0.5 m top edge.
 WIDTH = 0.50
 HEIGHT = 0.70
 CELLS = 24               # grid cells along the shorter (width) edge
@@ -39,11 +21,6 @@ PANEL_TOP_Z = 1.20       # top edge height above the floor
 MASS = 0.05              # about a fat quarter of cotton, roughly a golf ball's mass
 RADIUS = 0.003           # flex collision thickness, about four stacked credit cards
 
-# Cloth wants a small step and the discrete integrator; MuJoCo requires
-# integrator="discrete" for flex elasticity (implicit/implicitfast are rejected).
-# young/poisson/thickness set a light, drapeable fabric, and elastic2d="both"
-# turns on bending and stretching so the sheet has real passive forces rather
-# than hanging slack.
 TIMESTEP = 0.001
 YOUNGS = "3e4"
 POISSON = "0.3"
@@ -119,9 +96,6 @@ def self_test():
 
     pins = [int(p) for p in flex.find("pin").get("id").split()]
     control("one pin per column across the width", len(pins) == nx, "%d of %d" % (len(pins), nx))
-    # A real ordering guard needs MuJoCo (see --verify). What the AST can check is
-    # that the ids are the y-fastest top edge and NOT the old x-fastest formula,
-    # so a regression back to the wrong formula fails here.
     wrong = sorted((ny - 1) * nx + i for i in range(nx))
     control("pins use the y-fastest top edge, not the old x-fastest formula",
             sorted(pins) == top_row_ids(nx, ny) and sorted(pins) != wrong)
@@ -137,9 +111,6 @@ def self_test():
             float(m.find("option").get("timestep")) <= 0.002,
             "%.1f ms" % (float(m.find("option").get("timestep")) * 1000))
 
-    # A hand-computed oracle exercises the real formula: for a 3x4 grid the
-    # y-fastest top edge is [3, 7, 11]; the removed x-fastest formula gave
-    # [9, 10, 11]. A regression to the old formula fails here.
     control("the top-edge formula matches a hand-computed oracle, not the old one",
             top_row_ids(3, 4) == [3, 7, 11] and top_row_ids(3, 4) != [9, 10, 11])
 
@@ -190,9 +161,6 @@ def verify():
           "  the free edge actually drapes (a stuck panel would be caught)"
           "  [%.0f mm, about %.1f golf balls]" % (drop * 1000, drop / 0.0427))
 
-    # The determinism the demo exists to show: on one CPU build, two runs of the
-    # same guest must be bit-identical. Cross-host bit-identity is what the
-    # interpreted RISC-V guest then adds on top; this is the floor it builds on.
     import hashlib
 
     def digest(nsteps):
