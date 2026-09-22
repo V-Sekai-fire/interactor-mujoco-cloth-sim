@@ -1,27 +1,19 @@
+@tool
 extends Node3D
 
-const ELF := "res://plans/mujoco.elf"
 const MODEL := "res://plans/cloth.xml"
-const SUBSTEPS := 8
 
-var _sb: Object
+var _mj: MujocoWorld
 var _holder: Node3D
 var _cloth: MeshInstance3D
 var _faces: PackedInt32Array = PackedInt32Array()
 
 func _ready() -> void:
 	_build_scene()
-	_sb = ClassDB.instantiate("Sandbox")
-	if _sb == null:
-		push_error("Sandbox class missing; enable the godot_sandbox addon")
-		return
-	_sb.set("program", load(ELF))
-	_sb.set_memory_max(1024)
-	_sb.set_allocations_max(1 << 21)
-	_sb.set_unboxed_arguments(true)
-	if not _sb.vmcall("mjc_load_xml", FileAccess.get_file_as_bytes(MODEL)):
-		push_error("cloth model failed to load")
-		return
+	_mj = MujocoWorld.new()
+	_mj.model_path = MODEL
+	_mj.substeps = 8
+	add_child(_mj)
 	_holder = Node3D.new()
 	# MuJoCo is Z-up, Godot is Y-up.
 	_holder.rotation = Vector3(-PI / 2.0, 0, 0)
@@ -34,19 +26,17 @@ func _ready() -> void:
 	_cloth.material_override = mat
 	_holder.add_child(_cloth)
 	# The triangle connectivity is fixed, so it is read once and reused.
-	var f: PackedFloat64Array = _sb.vmcall("mjc_flexfaces")
-	for v in f:
+	for v in _mj.flexfaces():
 		_faces.append(int(v))
 
 func _process(_dt: float) -> void:
-	if _sb == null or _sb.vmcall("mjc_nflexvert") == 0:
+	if _mj == null or not _mj.alive():
 		return
-	for _s in range(SUBSTEPS):
-		_sb.vmcall("mjc_step")
+	_mj.step()
 	_update_cloth()
 
 func _update_cloth() -> void:
-	var v: PackedFloat64Array = _sb.vmcall("mjc_flexverts")
+	var v := _mj.flexverts()
 	var nv := int(v.size() / 3.0)
 	if nv == 0 or _faces.is_empty():
 		return

@@ -13,3 +13,7 @@ anti_aliasing/quality/msaa_3d=2
 [sandbox]
 
 toolchain/skip_dependency_check=true
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/godot_sandbox/plugin.cfg", "res://addons/cineform/plugin.cfg", "res://addons/mujoco/plugin.cfg")
