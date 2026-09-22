@@ -1,57 +1,80 @@
 @tool
 extends Node3D
 
-const MODEL := "res://plans/cloth.xml"
+## AVBD cloth: a row of independent islands, each solved in its own RISC-V
+## sandbox and stepped in parallel on the worker pool. Every island is
+## bit-identical across hosts; the row shows the multi-core throughput.
 
-var _mj: MujocoWorld
-var _holder: Node3D
-var _cloth: MeshInstance3D
+const ISLANDS := 8
+const SPACING := 0.62
+const SUBSTEP_H := 0.005  # AVBD fixed substep, matches ClothSim::H
+const AvbdWorldScript := preload("res://addons/mujoco/avbd_world.gd")
+
+var _world
+var _meshes: Array[MeshInstance3D] = []
 var _faces: PackedInt32Array = PackedInt32Array()
+var _capturing := false
+var _frames := 0
 
 func _ready() -> void:
+	# When launched with `--write-movie ... -- capture`, record a fixed length
+	# then quit; Movie Maker feeds each frame to the CineForm writer.
+	_capturing = OS.get_cmdline_user_args().has("capture")
 	_build_scene()
-	_mj = MujocoWorld.new()
-	_mj.model_path = MODEL
-	_mj.substeps = 8
-	add_child(_mj)
-	_holder = Node3D.new()
-	# MuJoCo is Z-up, Godot is Y-up.
-	_holder.rotation = Vector3(-PI / 2.0, 0, 0)
-	add_child(_holder)
+	_world = AvbdWorldScript.new()
+	_world.islands = ISLANDS
+	_world.substeps = 4
+	_world.iters = 20
+	_world.parallel = true
+	add_child(_world)
+
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(0.72, 0.3, 0.4)
 	mat.roughness = 0.85
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	_cloth = MeshInstance3D.new()
-	_cloth.material_override = mat
-	_holder.add_child(_cloth)
-	# The triangle connectivity is fixed, so it is read once and reused.
-	for v in _mj.flexfaces():
+
+	# Connectivity is identical across islands, so it is read once.
+	var f: PackedFloat64Array = _world.faces(0)
+	for v in f:
 		_faces.append(int(v))
 
-func _process(_dt: float) -> void:
-	if _mj == null or not _mj.alive():
-		return
-	_mj.step()
-	_update_cloth()
+	for i in range(_world.count()):
+		var mi := MeshInstance3D.new()
+		mi.material_override = mat
+		mi.position = Vector3((float(i) - float(_world.count() - 1) * 0.5) * SPACING, 0.0, 0.0)
+		add_child(mi)
+		_meshes.append(mi)
 
-func _update_cloth() -> void:
-	var v := _mj.flexverts()
+func _process(_dt: float) -> void:
+	if _world == null or not _world.alive():
+		return
+	# Fixed 4 substeps of 5 ms = 20 ms of sim per frame; at 50 fps that is
+	# realtime, and it keeps the step count deterministic for capture.
+	_world.substeps = 4
+	_world.step()
+	for i in range(_meshes.size()):
+		_update_island(i)
+	_frames += 1
+	if _capturing and _frames >= 300:
+		get_tree().quit()
+
+func _update_island(i: int) -> void:
+	var v: PackedFloat64Array = _world.verts(i)
 	var nv := int(v.size() / 3.0)
 	if nv == 0 or _faces.is_empty():
 		return
 	var pts := PackedVector3Array()
 	pts.resize(nv)
-	for i in range(nv):
-		pts[i] = Vector3(v[i * 3], v[i * 3 + 1], v[i * 3 + 2])
+	for k in range(nv):
+		pts[k] = Vector3(v[k * 3], v[k * 3 + 1], v[k * 3 + 2])
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for i in range(0, _faces.size(), 3):
-		st.add_vertex(pts[_faces[i]])
-		st.add_vertex(pts[_faces[i + 1]])
-		st.add_vertex(pts[_faces[i + 2]])
+	for k in range(0, _faces.size(), 3):
+		st.add_vertex(pts[_faces[k]])
+		st.add_vertex(pts[_faces[k + 1]])
+		st.add_vertex(pts[_faces[k + 2]])
 	st.generate_normals()
-	_cloth.mesh = st.commit()
+	_meshes[i].mesh = st.commit()
 
 func _build_scene() -> void:
 	var we := WorldEnvironment.new()
@@ -67,7 +90,9 @@ func _build_scene() -> void:
 	light.rotation = Vector3(-0.9, 0.5, 0.0)
 	add_child(light)
 	var cam := Camera3D.new()
-	cam.position = Vector3(-0.25, 0.85, 1.35)
-	cam.fov = 45.0
+	# Elevated 3/4 view so the panels read as surfaces and the downward drape
+	# between the pinned corners is clearly visible (not edge-on).
+	cam.position = Vector3(0.0, 2.5, 3.2)
+	cam.fov = 55.0
 	add_child(cam)
-	cam.look_at(Vector3(-0.25, 0.7, 0.0), Vector3.UP)
+	cam.look_at(Vector3(0.0, 0.55, 0.25), Vector3.UP)
