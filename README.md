@@ -8,12 +8,12 @@ The panel hangs as a flex sheet in a physics guest that runs inside the godot-sa
 
 ## Build and run
 
-`scripts/make_cloth.py` generates the panel model, and `project/` is the engine project that runs it.
+`scripts/make_cloth.py` generates the panel model with Python 3.10 or later, and `project/` is the engine project that runs it.
 
 ```sh
-python scripts/make_cloth.py
+python3 scripts/make_cloth.py
 ```
 
 ## Licence
 
-MIT, as `CITATION.cff` states; the repository has no licence file. The vendored addons under `project/addons/` carry their own licences.
+MIT, as `CITATION.cff` states; the repository has no licence file. The `cineform` and `godot_sandbox` addons under `project/addons/` carry their own licences.
