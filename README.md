@@ -16,4 +16,4 @@ python3 scripts/make_cloth.py
 
 ## Licence
 
-MIT, as `CITATION.cff` states; the repository has no licence file. The `cineform` and `godot_sandbox` addons under `project/addons/` carry their own licences.
+MIT. See [LICENSE](LICENSE). The `cineform` and `godot_sandbox` addons under `project/addons/` carry their own licences.
